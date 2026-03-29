@@ -7,7 +7,9 @@ pub mod executor;
 pub mod fuzzer;
 pub mod minimizer;
 pub mod mutation;
+pub mod parallel;
 pub mod stats;
 
 pub use error::{Error, Result};
 pub use fuzzer::{FuzzResult, Fuzzer};
+pub use parallel::{AtomicStats, ParallelFuzzer, SharedState};
