@@ -1,6 +1,5 @@
-use super::strategies::MutationStrategy;
+use super::strategies::{MutationStrategy, RngCore};
 use crate::error::Result;
-use rand::Rng;
 use std::fs;
 use std::path::Path;
 
@@ -17,7 +16,6 @@ impl Dictionary {
     }
 
     /// Load dictionary from file.
-    /// Format: one token per line, supports hex escapes (\xNN).
     pub fn load(path: &Path) -> Result<Self> {
         let content = fs::read_to_string(path)?;
         let mut dict = Self::new();
@@ -43,11 +41,11 @@ impl Dictionary {
     }
 
     /// Get a random token.
-    pub fn random(&self, rng: &mut impl Rng) -> Option<&[u8]> {
+    pub fn random(&self, rng: &mut dyn RngCore) -> Option<&[u8]> {
         if self.tokens.is_empty() {
             None
         } else {
-            let idx = rng.gen_range(0..self.tokens.len());
+            let idx = rng.gen_range_usize(0, self.tokens.len());
             Some(&self.tokens[idx])
         }
     }
@@ -66,7 +64,6 @@ impl Dictionary {
     pub fn auto_extract(data: &[u8]) -> Self {
         let mut dict = Self::new();
 
-        // Extract printable strings
         let mut current_string = Vec::new();
         for &b in data {
             if b.is_ascii_graphic() || b == b' ' {
@@ -82,7 +79,6 @@ impl Dictionary {
             dict.add(current_string);
         }
 
-        // Extract common magic bytes
         for window_size in [2, 4, 8] {
             if data.len() >= window_size {
                 dict.add(data[..window_size].to_vec());
@@ -93,9 +89,7 @@ impl Dictionary {
     }
 }
 
-/// Parse a dictionary token, handling escape sequences.
 fn parse_token(s: &str) -> Option<Vec<u8>> {
-    // Handle quoted strings
     let s = s.trim_matches('"');
     let mut result = Vec::new();
     let mut chars = s.chars().peekable();
@@ -125,11 +119,7 @@ fn parse_token(s: &str) -> Option<Vec<u8>> {
         }
     }
 
-    if result.is_empty() {
-        None
-    } else {
-        Some(result)
-    }
+    if result.is_empty() { None } else { Some(result) }
 }
 
 /// Insert a dictionary token at a random position.
@@ -144,9 +134,9 @@ impl DictInsert {
 }
 
 impl MutationStrategy for DictInsert {
-    fn mutate(&self, input: &mut Vec<u8>, rng: &mut impl Rng) {
+    fn mutate(&self, input: &mut Vec<u8>, rng: &mut dyn RngCore) {
         if let Some(token) = self.dict.random(rng) {
-            let pos = rng.gen_range(0..=input.len());
+            let pos = rng.gen_range_usize(0, input.len() + 1);
             input.splice(pos..pos, token.iter().copied());
         }
     }
@@ -168,10 +158,10 @@ impl DictOverwrite {
 }
 
 impl MutationStrategy for DictOverwrite {
-    fn mutate(&self, input: &mut Vec<u8>, rng: &mut impl Rng) {
+    fn mutate(&self, input: &mut Vec<u8>, rng: &mut dyn RngCore) {
         if let Some(token) = self.dict.random(rng) {
             if input.len() >= token.len() {
-                let pos = rng.gen_range(0..=input.len() - token.len());
+                let pos = rng.gen_range_usize(0, input.len() - token.len() + 1);
                 for (i, &b) in token.iter().enumerate() {
                     input[pos + i] = b;
                 }
@@ -208,12 +198,8 @@ mod tests {
         dict.add(b"hello".to_vec());
         dict.add(b"world".to_vec());
         assert_eq!(dict.len(), 2);
-
-        // Duplicates not added
         dict.add(b"hello".to_vec());
         assert_eq!(dict.len(), 2);
-
-        // Empty not added
         dict.add(vec![]);
         assert_eq!(dict.len(), 2);
     }
@@ -222,9 +208,7 @@ mod tests {
     fn test_dictionary_random() {
         let mut dict = Dictionary::new();
         let mut rng = seeded_rng();
-
         assert!(dict.random(&mut rng).is_none());
-
         dict.add(b"test".to_vec());
         assert_eq!(dict.random(&mut rng), Some(b"test".as_ref()));
     }
@@ -271,7 +255,6 @@ mod tests {
         let original_len = input.len();
         let mut rng = seeded_rng();
         mutator.mutate(&mut input, &mut rng);
-
         assert_eq!(input.len(), original_len + 4);
     }
 
@@ -284,10 +267,7 @@ mod tests {
         let mut input = vec![1, 2, 3, 4];
         let mut rng = seeded_rng();
         mutator.mutate(&mut input, &mut rng);
-
-        // Length unchanged
         assert_eq!(input.len(), 4);
-        // Should contain XX somewhere
         let has_xx = input.windows(2).any(|w| w == b"XX");
         assert!(has_xx);
     }

@@ -1,17 +1,16 @@
-use super::strategies::MutationStrategy;
-use rand::Rng;
+use super::strategies::{MutationStrategy, RngCore};
 
 /// Delete a random chunk of bytes.
 pub struct BlockDelete;
 
 impl MutationStrategy for BlockDelete {
-    fn mutate(&self, input: &mut Vec<u8>, rng: &mut impl Rng) {
+    fn mutate(&self, input: &mut Vec<u8>, rng: &mut dyn RngCore) {
         if input.len() < 2 {
             return;
         }
         let max_del = std::cmp::min(input.len() - 1, 32);
-        let del_len = rng.gen_range(1..=max_del);
-        let start = rng.gen_range(0..=input.len() - del_len);
+        let del_len = rng.gen_range_usize(1, max_del + 1);
+        let start = rng.gen_range_usize(0, input.len() - del_len + 1);
         input.drain(start..start + del_len);
     }
 
@@ -24,15 +23,15 @@ impl MutationStrategy for BlockDelete {
 pub struct BlockInsert;
 
 impl MutationStrategy for BlockInsert {
-    fn mutate(&self, input: &mut Vec<u8>, rng: &mut impl Rng) {
+    fn mutate(&self, input: &mut Vec<u8>, rng: &mut dyn RngCore) {
         let max_ins = std::cmp::min(32, 1024 - input.len());
         if max_ins == 0 {
             return;
         }
-        let ins_len = rng.gen_range(1..=max_ins);
-        let pos = rng.gen_range(0..=input.len());
+        let ins_len = rng.gen_range_usize(1, max_ins + 1);
+        let pos = rng.gen_range_usize(0, input.len() + 1);
 
-        let new_bytes: Vec<u8> = (0..ins_len).map(|_| rng.gen()).collect();
+        let new_bytes: Vec<u8> = (0..ins_len).map(|_| rng.gen_u8()).collect();
         input.splice(pos..pos, new_bytes);
     }
 
@@ -45,16 +44,16 @@ impl MutationStrategy for BlockInsert {
 pub struct BlockOverwrite;
 
 impl MutationStrategy for BlockOverwrite {
-    fn mutate(&self, input: &mut Vec<u8>, rng: &mut impl Rng) {
+    fn mutate(&self, input: &mut Vec<u8>, rng: &mut dyn RngCore) {
         if input.is_empty() {
             return;
         }
         let max_len = std::cmp::min(input.len(), 32);
-        let len = rng.gen_range(1..=max_len);
-        let start = rng.gen_range(0..=input.len() - len);
+        let len = rng.gen_range_usize(1, max_len + 1);
+        let start = rng.gen_range_usize(0, input.len() - len + 1);
 
         for i in start..start + len {
-            input[i] = rng.gen();
+            input[i] = rng.gen_u8();
         }
     }
 
@@ -67,19 +66,16 @@ impl MutationStrategy for BlockOverwrite {
 pub struct BlockClone;
 
 impl MutationStrategy for BlockClone {
-    fn mutate(&self, input: &mut Vec<u8>, rng: &mut impl Rng) {
+    fn mutate(&self, input: &mut Vec<u8>, rng: &mut dyn RngCore) {
         if input.len() < 2 {
             return;
         }
         let max_len = std::cmp::min(input.len(), 32);
-        let len = rng.gen_range(1..=max_len);
-        let src_start = rng.gen_range(0..=input.len() - len);
+        let len = rng.gen_range_usize(1, max_len + 1);
+        let src_start = rng.gen_range_usize(0, input.len() - len + 1);
 
-        // Clone the chunk
         let chunk: Vec<u8> = input[src_start..src_start + len].to_vec();
-
-        // Insert at random position
-        let dst = rng.gen_range(0..=input.len());
+        let dst = rng.gen_range_usize(0, input.len() + 1);
         input.splice(dst..dst, chunk);
     }
 
@@ -92,7 +88,7 @@ impl MutationStrategy for BlockClone {
 pub struct BlockSwap;
 
 impl MutationStrategy for BlockSwap {
-    fn mutate(&self, input: &mut Vec<u8>, rng: &mut impl Rng) {
+    fn mutate(&self, input: &mut Vec<u8>, rng: &mut dyn RngCore) {
         if input.len() < 4 {
             return;
         }
@@ -100,13 +96,11 @@ impl MutationStrategy for BlockSwap {
         if max_len == 0 {
             return;
         }
-        let len = rng.gen_range(1..=max_len);
+        let len = rng.gen_range_usize(1, max_len + 1);
 
-        // Pick two non-overlapping positions
-        let pos1 = rng.gen_range(0..=input.len() - len * 2);
-        let pos2 = rng.gen_range(pos1 + len..=input.len() - len);
+        let pos1 = rng.gen_range_usize(0, input.len() - len * 2 + 1);
+        let pos2 = rng.gen_range_usize(pos1 + len, input.len() - len + 1);
 
-        // Swap the chunks
         for i in 0..len {
             input.swap(pos1 + i, pos2 + i);
         }
@@ -160,7 +154,6 @@ mod tests {
         let mut input = vec![0, 0, 0, 0, 0];
         let mut rng = seeded_rng();
         BlockOverwrite.mutate(&mut input, &mut rng);
-        // At least some bytes should change (very likely)
         let zeros = input.iter().filter(|&&b| b == 0).count();
         assert!(zeros < 5);
     }
@@ -180,7 +173,6 @@ mod tests {
         let original = input.clone();
         let mut rng = seeded_rng();
         BlockSwap.mutate(&mut input, &mut rng);
-        // Same length but different content
         assert_eq!(input.len(), original.len());
         assert_ne!(input, original);
     }

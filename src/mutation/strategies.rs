@@ -3,22 +3,48 @@ use rand::Rng;
 /// Trait for mutation strategies.
 pub trait MutationStrategy: Send + Sync {
     /// Apply mutation to input buffer.
-    fn mutate(&self, input: &mut Vec<u8>, rng: &mut impl Rng);
+    fn mutate(&self, input: &mut Vec<u8>, rng: &mut dyn RngCore);
 
     /// Name of this mutation strategy.
     fn name(&self) -> &'static str;
+}
+
+/// Object-safe wrapper around RNG functionality we need.
+pub trait RngCore {
+    fn gen_range_usize(&mut self, low: usize, high: usize) -> usize;
+    fn gen_range_i32(&mut self, low: i32, high: i32) -> i32;
+    fn gen_u8(&mut self) -> u8;
+    fn gen_bool(&mut self, p: f64) -> bool;
+}
+
+impl<R: Rng> RngCore for R {
+    fn gen_range_usize(&mut self, low: usize, high: usize) -> usize {
+        self.gen_range(low..high)
+    }
+
+    fn gen_range_i32(&mut self, low: i32, high: i32) -> i32 {
+        self.gen_range(low..high)
+    }
+
+    fn gen_u8(&mut self) -> u8 {
+        self.gen()
+    }
+
+    fn gen_bool(&mut self, p: f64) -> bool {
+        Rng::gen_bool(self, p)
+    }
 }
 
 /// Flip a single bit at a random position.
 pub struct BitFlip1;
 
 impl MutationStrategy for BitFlip1 {
-    fn mutate(&self, input: &mut Vec<u8>, rng: &mut impl Rng) {
+    fn mutate(&self, input: &mut Vec<u8>, rng: &mut dyn RngCore) {
         if input.is_empty() {
             return;
         }
-        let byte_idx = rng.gen_range(0..input.len());
-        let bit_idx = rng.gen_range(0..8);
+        let byte_idx = rng.gen_range_usize(0, input.len());
+        let bit_idx = rng.gen_range_usize(0, 8);
         input[byte_idx] ^= 1 << bit_idx;
     }
 
@@ -31,13 +57,13 @@ impl MutationStrategy for BitFlip1 {
 pub struct BitFlip2;
 
 impl MutationStrategy for BitFlip2 {
-    fn mutate(&self, input: &mut Vec<u8>, rng: &mut impl Rng) {
+    fn mutate(&self, input: &mut Vec<u8>, rng: &mut dyn RngCore) {
         if input.is_empty() {
             return;
         }
-        let byte_idx = rng.gen_range(0..input.len());
-        let bit_idx = rng.gen_range(0..7); // 0-6 to fit 2 bits
-        input[byte_idx] ^= 3 << bit_idx; // 0b11 shifted
+        let byte_idx = rng.gen_range_usize(0, input.len());
+        let bit_idx = rng.gen_range_usize(0, 7);
+        input[byte_idx] ^= 3 << bit_idx;
     }
 
     fn name(&self) -> &'static str {
@@ -49,13 +75,13 @@ impl MutationStrategy for BitFlip2 {
 pub struct BitFlip4;
 
 impl MutationStrategy for BitFlip4 {
-    fn mutate(&self, input: &mut Vec<u8>, rng: &mut impl Rng) {
+    fn mutate(&self, input: &mut Vec<u8>, rng: &mut dyn RngCore) {
         if input.is_empty() {
             return;
         }
-        let byte_idx = rng.gen_range(0..input.len());
-        let bit_idx = rng.gen_range(0..5); // 0-4 to fit 4 bits
-        input[byte_idx] ^= 0xF << bit_idx; // 0b1111 shifted
+        let byte_idx = rng.gen_range_usize(0, input.len());
+        let bit_idx = rng.gen_range_usize(0, 5);
+        input[byte_idx] ^= 0xF << bit_idx;
     }
 
     fn name(&self) -> &'static str {
@@ -67,11 +93,11 @@ impl MutationStrategy for BitFlip4 {
 pub struct ByteFlip1;
 
 impl MutationStrategy for ByteFlip1 {
-    fn mutate(&self, input: &mut Vec<u8>, rng: &mut impl Rng) {
+    fn mutate(&self, input: &mut Vec<u8>, rng: &mut dyn RngCore) {
         if input.is_empty() {
             return;
         }
-        let idx = rng.gen_range(0..input.len());
+        let idx = rng.gen_range_usize(0, input.len());
         input[idx] ^= 0xFF;
     }
 
@@ -84,11 +110,11 @@ impl MutationStrategy for ByteFlip1 {
 pub struct ByteFlip2;
 
 impl MutationStrategy for ByteFlip2 {
-    fn mutate(&self, input: &mut Vec<u8>, rng: &mut impl Rng) {
+    fn mutate(&self, input: &mut Vec<u8>, rng: &mut dyn RngCore) {
         if input.len() < 2 {
             return;
         }
-        let idx = rng.gen_range(0..input.len() - 1);
+        let idx = rng.gen_range_usize(0, input.len() - 1);
         input[idx] ^= 0xFF;
         input[idx + 1] ^= 0xFF;
     }
@@ -102,11 +128,11 @@ impl MutationStrategy for ByteFlip2 {
 pub struct ByteFlip4;
 
 impl MutationStrategy for ByteFlip4 {
-    fn mutate(&self, input: &mut Vec<u8>, rng: &mut impl Rng) {
+    fn mutate(&self, input: &mut Vec<u8>, rng: &mut dyn RngCore) {
         if input.len() < 4 {
             return;
         }
-        let idx = rng.gen_range(0..input.len() - 3);
+        let idx = rng.gen_range_usize(0, input.len() - 3);
         for i in 0..4 {
             input[idx + i] ^= 0xFF;
         }
@@ -124,12 +150,12 @@ const ARITH_MAX: i32 = 35;
 pub struct Arith8;
 
 impl MutationStrategy for Arith8 {
-    fn mutate(&self, input: &mut Vec<u8>, rng: &mut impl Rng) {
+    fn mutate(&self, input: &mut Vec<u8>, rng: &mut dyn RngCore) {
         if input.is_empty() {
             return;
         }
-        let idx = rng.gen_range(0..input.len());
-        let delta = rng.gen_range(1..=ARITH_MAX) as i16;
+        let idx = rng.gen_range_usize(0, input.len());
+        let delta = rng.gen_range_i32(1, ARITH_MAX + 1) as i16;
         let val = input[idx] as i16;
         input[idx] = if rng.gen_bool(0.5) {
             val.wrapping_add(delta) as u8
@@ -147,16 +173,14 @@ impl MutationStrategy for Arith8 {
 pub struct Arith16;
 
 impl MutationStrategy for Arith16 {
-    fn mutate(&self, input: &mut Vec<u8>, rng: &mut impl Rng) {
+    fn mutate(&self, input: &mut Vec<u8>, rng: &mut dyn RngCore) {
         if input.len() < 2 {
             return;
         }
-        let idx = rng.gen_range(0..input.len() - 1);
-        let delta = rng.gen_range(1..=ARITH_MAX) as i32;
+        let idx = rng.gen_range_usize(0, input.len() - 1);
+        let delta = rng.gen_range_i32(1, ARITH_MAX + 1);
 
-        // Try both endiannesses
         if rng.gen_bool(0.5) {
-            // Little endian
             let val = u16::from_le_bytes([input[idx], input[idx + 1]]) as i32;
             let new_val = if rng.gen_bool(0.5) {
                 val.wrapping_add(delta) as u16
@@ -167,7 +191,6 @@ impl MutationStrategy for Arith16 {
             input[idx] = bytes[0];
             input[idx + 1] = bytes[1];
         } else {
-            // Big endian
             let val = u16::from_be_bytes([input[idx], input[idx + 1]]) as i32;
             let new_val = if rng.gen_bool(0.5) {
                 val.wrapping_add(delta) as u16
@@ -189,16 +212,14 @@ impl MutationStrategy for Arith16 {
 pub struct Arith32;
 
 impl MutationStrategy for Arith32 {
-    fn mutate(&self, input: &mut Vec<u8>, rng: &mut impl Rng) {
+    fn mutate(&self, input: &mut Vec<u8>, rng: &mut dyn RngCore) {
         if input.len() < 4 {
             return;
         }
-        let idx = rng.gen_range(0..input.len() - 3);
-        let delta = rng.gen_range(1..=ARITH_MAX) as i64;
+        let idx = rng.gen_range_usize(0, input.len() - 3);
+        let delta = rng.gen_range_i32(1, ARITH_MAX + 1) as i64;
 
-        // Try both endiannesses
         if rng.gen_bool(0.5) {
-            // Little endian
             let val = u32::from_le_bytes([
                 input[idx],
                 input[idx + 1],
@@ -215,7 +236,6 @@ impl MutationStrategy for Arith32 {
                 input[idx + i] = bytes[i];
             }
         } else {
-            // Big endian
             let val = u32::from_be_bytes([
                 input[idx],
                 input[idx + 1],
@@ -243,12 +263,12 @@ impl MutationStrategy for Arith32 {
 pub struct RandomByte;
 
 impl MutationStrategy for RandomByte {
-    fn mutate(&self, input: &mut Vec<u8>, rng: &mut impl Rng) {
+    fn mutate(&self, input: &mut Vec<u8>, rng: &mut dyn RngCore) {
         if input.is_empty() {
             return;
         }
-        let idx = rng.gen_range(0..input.len());
-        input[idx] = rng.gen();
+        let idx = rng.gen_range_usize(0, input.len());
+        input[idx] = rng.gen_u8();
     }
 
     fn name(&self) -> &'static str {
@@ -271,7 +291,6 @@ mod tests {
         let mut input = vec![0b00000000];
         let mut rng = seeded_rng();
         BitFlip1.mutate(&mut input, &mut rng);
-        // Should have exactly 1 bit set
         assert_eq!(input[0].count_ones(), 1);
     }
 
@@ -288,7 +307,6 @@ mod tests {
         let mut input = vec![0b00000000];
         let mut rng = seeded_rng();
         BitFlip2.mutate(&mut input, &mut rng);
-        // Should have exactly 2 adjacent bits set
         assert_eq!(input[0].count_ones(), 2);
     }
 
@@ -297,7 +315,6 @@ mod tests {
         let mut input = vec![0b00000000];
         let mut rng = seeded_rng();
         BitFlip4.mutate(&mut input, &mut rng);
-        // Should have exactly 4 adjacent bits set
         assert_eq!(input[0].count_ones(), 4);
     }
 
@@ -307,10 +324,8 @@ mod tests {
         let original = input.clone();
         let mut rng = seeded_rng();
         ByteFlip1.mutate(&mut input, &mut rng);
-        // Exactly one byte should be 0xFF
         let changed = input.iter().filter(|&&b| b == 0xFF).count();
         assert_eq!(changed, 1);
-        // Other bytes unchanged
         let unchanged = input
             .iter()
             .zip(original.iter())
@@ -324,7 +339,6 @@ mod tests {
         let mut input = vec![0x00, 0x00, 0x00, 0x00];
         let mut rng = seeded_rng();
         ByteFlip2.mutate(&mut input, &mut rng);
-        // Exactly two adjacent bytes should be 0xFF
         let changed = input.iter().filter(|&&b| b == 0xFF).count();
         assert_eq!(changed, 2);
     }
@@ -334,7 +348,6 @@ mod tests {
         let mut input = vec![0x00, 0x00, 0x00, 0x00, 0x00];
         let mut rng = seeded_rng();
         ByteFlip4.mutate(&mut input, &mut rng);
-        // Exactly four adjacent bytes should be 0xFF
         let changed = input.iter().filter(|&&b| b == 0xFF).count();
         assert_eq!(changed, 4);
     }
@@ -345,7 +358,6 @@ mod tests {
         let original = input.clone();
         let mut rng = seeded_rng();
         ByteFlip4.mutate(&mut input, &mut rng);
-        // Should not modify short input
         assert_eq!(input, original);
     }
 
@@ -355,7 +367,6 @@ mod tests {
         let original = input[0];
         let mut rng = seeded_rng();
         Arith8.mutate(&mut input, &mut rng);
-        // Value should change by at most ARITH_MAX
         let diff = (input[0] as i16 - original as i16).abs();
         assert!(diff <= ARITH_MAX as i16);
         assert!(diff >= 1);
@@ -363,10 +374,9 @@ mod tests {
 
     #[test]
     fn test_arith_16() {
-        let mut input = vec![0x00, 0x64]; // 100 in big endian
+        let mut input = vec![0x00, 0x64];
         let mut rng = seeded_rng();
         Arith16.mutate(&mut input, &mut rng);
-        // Input should be modified
         assert!(input != vec![0x00, 0x64] || input != vec![0x64, 0x00]);
     }
 
@@ -376,7 +386,6 @@ mod tests {
         let original = input.clone();
         let mut rng = seeded_rng();
         Arith32.mutate(&mut input, &mut rng);
-        // Input should be modified
         assert_ne!(input, original);
     }
 
@@ -385,9 +394,7 @@ mod tests {
         let mut input = vec![0x00, 0x00, 0x00];
         let mut rng = seeded_rng();
         RandomByte.mutate(&mut input, &mut rng);
-        // At least one byte should change (very likely with random value)
         let zeros = input.iter().filter(|&&b| b == 0).count();
-        // It's possible all stay zero, but extremely unlikely
         assert!(zeros < 3 || input.iter().any(|&b| b != 0));
     }
 
