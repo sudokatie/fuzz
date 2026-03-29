@@ -1,0 +1,18 @@
+/target
+Cargo.lock
+*.swp
+*.swo
+.DS_Store
+.idea/
+.vscode/
+
+# Fuzzing output
+fuzz_output/
+crashes/
+corpus/
+
+# Test artifacts
+test_targets/*.o
+test_targets/overflow
+test_targets/null_deref
+test_targets/timeout
