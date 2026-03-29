@@ -1,5 +1,7 @@
+use crate::error::{Error, Result};
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
@@ -120,5 +122,171 @@ impl Default for Config {
             mutation: MutationConfig::default(),
             output: OutputConfig::default(),
         }
+    }
+}
+
+impl Config {
+    /// Load config from a TOML file.
+    pub fn load(path: &Path) -> Result<Self> {
+        let content = fs::read_to_string(path)
+            .map_err(|e| Error::Config(format!("failed to read config file: {}", e)))?;
+        Self::parse(&content)
+    }
+
+    /// Parse config from TOML string.
+    pub fn parse(content: &str) -> Result<Self> {
+        toml::from_str(content)
+            .map_err(|e| Error::Config(format!("failed to parse config: {}", e)))
+    }
+
+    /// Load config from file if it exists, otherwise use defaults.
+    pub fn load_or_default(path: Option<&Path>) -> Result<Self> {
+        match path {
+            Some(p) if p.exists() => Self::load(p),
+            _ => Ok(Self::default()),
+        }
+    }
+
+    /// Validate the config.
+    pub fn validate(&self) -> Result<()> {
+        // Validate target path if specified
+        if let Some(ref path) = self.target.path {
+            if !path.exists() {
+                return Err(Error::Config(format!(
+                    "target path does not exist: {}",
+                    path.display()
+                )));
+            }
+        }
+
+        // Validate seed directories
+        for dir in &self.corpus.seed_dirs {
+            if !dir.exists() {
+                return Err(Error::Config(format!(
+                    "seed directory does not exist: {}",
+                    dir.display()
+                )));
+            }
+        }
+
+        // Validate timeout
+        if self.execution.timeout_ms == 0 {
+            return Err(Error::Config("timeout must be greater than 0".into()));
+        }
+
+        Ok(())
+    }
+}
+
+/// Load config from path or return defaults.
+pub fn load_config(path: Option<&Path>) -> Result<Config> {
+    Config::load_or_default(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_config_default() {
+        let config = Config::default();
+        assert!(config.target.path.is_none());
+        assert_eq!(config.execution.timeout_ms, 1000);
+        assert_eq!(config.execution.jobs, 1);
+        assert_eq!(config.corpus.max_size, 1_048_576);
+        assert_eq!(config.output.dir, PathBuf::from("fuzz_output"));
+    }
+
+    #[test]
+    fn test_config_parse() {
+        let toml = r#"
+[target]
+path = "/bin/test"
+args = ["-f", "@@"]
+
+[execution]
+timeout_ms = 5000
+jobs = 4
+
+[corpus]
+max_size = 4096
+
+[output]
+dir = "my_output"
+save_all = true
+"#;
+
+        let config = Config::parse(toml).expect("failed to parse");
+        assert_eq!(config.target.path, Some(PathBuf::from("/bin/test")));
+        assert_eq!(config.target.args, vec!["-f", "@@"]);
+        assert_eq!(config.execution.timeout_ms, 5000);
+        assert_eq!(config.execution.jobs, 4);
+        assert_eq!(config.corpus.max_size, 4096);
+        assert_eq!(config.output.dir, PathBuf::from("my_output"));
+        assert!(config.output.save_all);
+    }
+
+    #[test]
+    fn test_config_parse_partial() {
+        // Only specify some fields, rest should use defaults
+        let toml = r#"
+[execution]
+timeout_ms = 2000
+"#;
+
+        let config = Config::parse(toml).expect("failed to parse");
+        assert_eq!(config.execution.timeout_ms, 2000);
+        assert_eq!(config.execution.jobs, 1); // default
+        assert!(config.target.path.is_none()); // default
+    }
+
+    #[test]
+    fn test_config_load_file() {
+        let dir = TempDir::new().unwrap();
+        let config_path = dir.path().join("fuzz.toml");
+
+        fs::write(
+            &config_path,
+            r#"
+[execution]
+timeout_ms = 3000
+"#,
+        )
+        .unwrap();
+
+        let config = Config::load(&config_path).expect("failed to load");
+        assert_eq!(config.execution.timeout_ms, 3000);
+    }
+
+    #[test]
+    fn test_config_load_or_default_missing() {
+        let config = Config::load_or_default(Some(Path::new("/nonexistent/config.toml")))
+            .expect("should return defaults");
+        assert_eq!(config.execution.timeout_ms, 1000);
+    }
+
+    #[test]
+    fn test_config_validate_timeout_zero() {
+        let mut config = Config::default();
+        config.execution.timeout_ms = 0;
+
+        let result = config.validate();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_config_validate_missing_seed_dir() {
+        let mut config = Config::default();
+        config.corpus.seed_dirs.push(PathBuf::from("/nonexistent/seeds"));
+
+        let result = config.validate();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_load_config_helper() {
+        let config = load_config(None).expect("should return defaults");
+        assert_eq!(config.execution.timeout_ms, 1000);
     }
 }
