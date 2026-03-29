@@ -1,9 +1,7 @@
 use super::strategies::{MutationStrategy, RngCore};
 
 /// Interesting 8-bit values.
-const INTERESTING_8: &[u8] = &[
-    0, 1, 16, 32, 64, 100, 127, 128, 255,
-];
+const INTERESTING_8: &[u8] = &[0, 1, 16, 32, 64, 100, 127, 128, 255];
 
 /// Interesting 16-bit values.
 const INTERESTING_16: &[u16] = &[

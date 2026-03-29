@@ -135,8 +135,7 @@ impl Config {
 
     /// Parse config from TOML string.
     pub fn parse(content: &str) -> Result<Self> {
-        toml::from_str(content)
-            .map_err(|e| Error::Config(format!("failed to parse config: {}", e)))
+        toml::from_str(content).map_err(|e| Error::Config(format!("failed to parse config: {}", e)))
     }
 
     /// Load config from file if it exists, otherwise use defaults.
@@ -278,7 +277,10 @@ timeout_ms = 3000
     #[test]
     fn test_config_validate_missing_seed_dir() {
         let mut config = Config::default();
-        config.corpus.seed_dirs.push(PathBuf::from("/nonexistent/seeds"));
+        config
+            .corpus
+            .seed_dirs
+            .push(PathBuf::from("/nonexistent/seeds"));
 
         let result = config.validate();
         assert!(result.is_err());

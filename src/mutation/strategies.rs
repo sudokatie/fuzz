@@ -220,12 +220,9 @@ impl MutationStrategy for Arith32 {
         let delta = rng.gen_range_i32(1, ARITH_MAX + 1) as i64;
 
         if rng.gen_bool(0.5) {
-            let val = u32::from_le_bytes([
-                input[idx],
-                input[idx + 1],
-                input[idx + 2],
-                input[idx + 3],
-            ]) as i64;
+            let val =
+                u32::from_le_bytes([input[idx], input[idx + 1], input[idx + 2], input[idx + 3]])
+                    as i64;
             let new_val = if rng.gen_bool(0.5) {
                 val.wrapping_add(delta) as u32
             } else {
@@ -236,12 +233,9 @@ impl MutationStrategy for Arith32 {
                 input[idx + i] = bytes[i];
             }
         } else {
-            let val = u32::from_be_bytes([
-                input[idx],
-                input[idx + 1],
-                input[idx + 2],
-                input[idx + 3],
-            ]) as i64;
+            let val =
+                u32::from_be_bytes([input[idx], input[idx + 1], input[idx + 2], input[idx + 3]])
+                    as i64;
             let new_val = if rng.gen_bool(0.5) {
                 val.wrapping_add(delta) as u32
             } else {

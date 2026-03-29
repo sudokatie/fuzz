@@ -119,7 +119,11 @@ fn parse_token(s: &str) -> Option<Vec<u8>> {
         }
     }
 
-    if result.is_empty() { None } else { Some(result) }
+    if result.is_empty() {
+        None
+    } else {
+        Some(result)
+    }
 }
 
 /// Insert a dictionary token at a random position.

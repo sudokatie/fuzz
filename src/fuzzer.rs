@@ -51,7 +51,10 @@ impl Fuzzer {
         // Validate config
         config.validate()?;
 
-        let target_path = config.target.path.as_ref()
+        let target_path = config
+            .target
+            .path
+            .as_ref()
             .ok_or_else(|| Error::Config("target path required".into()))?;
 
         // Create output directory
@@ -178,7 +181,8 @@ impl Fuzzer {
         let running = self.running.clone();
         ctrlc::set_handler(move || {
             running.store(false, Ordering::SeqCst);
-        }).ok();
+        })
+        .ok();
 
         // Main loop
         while self.running.load(Ordering::SeqCst) {
@@ -277,7 +281,11 @@ impl Fuzzer {
 
     /// Count edges in virgin map (edges NOT seen yet have 0xff).
     fn virgin_edge_count(&self) -> usize {
-        self.virgin.as_slice().iter().filter(|&&b| b != 0xff).count()
+        self.virgin
+            .as_slice()
+            .iter()
+            .filter(|&&b| b != 0xff)
+            .count()
     }
 
     /// Get current stats.
@@ -294,8 +302,8 @@ impl Fuzzer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use std::path::PathBuf;
+    use tempfile::TempDir;
 
     fn find_true_binary() -> PathBuf {
         // macOS uses /usr/bin/true, Linux uses /bin/true

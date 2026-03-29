@@ -118,7 +118,10 @@ impl ParallelFuzzer {
     pub fn new(config: Config) -> Result<Self> {
         config.validate()?;
 
-        let target_path = config.target.path.as_ref()
+        let target_path = config
+            .target
+            .path
+            .as_ref()
             .ok_or_else(|| Error::Config("target path required".into()))?;
 
         // Create output directory
@@ -164,14 +167,14 @@ impl ParallelFuzzer {
                     if input.len() <= self.config.corpus.max_size {
                         let id = self.shared.next_id();
                         let entry = CorpusEntry::new(id, input);
-                        
+
                         // Save to corpus
                         self.shared.corpus.lock().unwrap().save(&entry)?;
-                        
+
                         // Add to scheduler
                         let metadata = EntryMetadata::from_entry(&entry, 0);
                         self.shared.scheduler.write().unwrap().add(metadata);
-                        
+
                         loaded += 1;
                     }
                 }
@@ -342,9 +345,9 @@ fn run_worker(worker_id: usize, config: Config, shared: Arc<SharedState>) -> Res
                             scheduler.add(metadata);
                         }
 
-                        shared.stats.set_corpus_size(
-                            shared.scheduler.read().unwrap().len() as u64
-                        );
+                        shared
+                            .stats
+                            .set_corpus_size(shared.scheduler.read().unwrap().len() as u64);
                     }
                 }
             }
@@ -357,8 +360,8 @@ fn run_worker(worker_id: usize, config: Config, shared: Arc<SharedState>) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use std::path::PathBuf;
+    use tempfile::TempDir;
 
     fn find_true_binary() -> PathBuf {
         for path in ["/usr/bin/true", "/bin/true"] {
@@ -382,7 +385,7 @@ mod tests {
     #[test]
     fn test_atomic_stats() {
         let stats = AtomicStats::new();
-        
+
         stats.record_exec();
         stats.record_exec();
         assert_eq!(stats.total_execs.load(Ordering::Relaxed), 2);
@@ -417,7 +420,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let corpus = CorpusStorage::open(temp_dir.path()).unwrap();
         let crashes = CrashStorage::open(&temp_dir.path().join("crashes")).unwrap();
-        
+
         let shared = SharedState::new(corpus, crashes);
 
         assert_eq!(shared.next_id(), 1);
@@ -430,7 +433,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let corpus = CorpusStorage::open(temp_dir.path()).unwrap();
         let crashes = CrashStorage::open(&temp_dir.path().join("crashes")).unwrap();
-        
+
         let shared = SharedState::new(corpus, crashes);
 
         assert!(shared.is_running());

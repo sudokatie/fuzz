@@ -221,7 +221,10 @@ mod tests {
         assert_eq!(format_duration(Duration::from_secs(0)), "00:00:00");
         assert_eq!(format_duration(Duration::from_secs(61)), "00:01:01");
         assert_eq!(format_duration(Duration::from_secs(3661)), "01:01:01");
-        assert_eq!(format_duration(Duration::from_secs(86400 + 3661)), "1d 01:01:01");
+        assert_eq!(
+            format_duration(Duration::from_secs(86400 + 3661)),
+            "1d 01:01:01"
+        );
     }
 
     #[test]

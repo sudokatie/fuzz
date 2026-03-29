@@ -27,8 +27,8 @@ pub struct BreakpointCollector {
 impl BreakpointCollector {
     /// Create a new breakpoint collector by analyzing a binary.
     pub fn from_binary(path: &Path) -> Result<Self> {
-        let data = fs::read(path)
-            .map_err(|e| Error::Coverage(format!("failed to read binary: {}", e)))?;
+        let data =
+            fs::read(path).map_err(|e| Error::Coverage(format!("failed to read binary: {}", e)))?;
 
         let blocks = parse_basic_blocks(&data)?;
 
@@ -168,7 +168,9 @@ fn parse_macho_blocks(mach: &goblin::mach::Mach) -> Result<Vec<u64>> {
                 for symbol in symbols.iter() {
                     if let Ok((_name, nlist)) = symbol {
                         // Check if it's a function (N_SECT type)
-                        if nlist.n_type & goblin::mach::symbols::N_TYPE == goblin::mach::symbols::N_SECT {
+                        if nlist.n_type & goblin::mach::symbols::N_TYPE
+                            == goblin::mach::symbols::N_SECT
+                        {
                             if nlist.n_value != 0 {
                                 blocks.push(nlist.n_value);
                             }
@@ -213,11 +215,11 @@ mod tests {
         let target = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("test_targets")
             .join("null_deref");
-        
+
         if target.exists() {
             return Some(target);
         }
-        
+
         // Fallback - won't work on macOS with fat binaries
         None
     }
@@ -233,7 +235,11 @@ mod tests {
         };
 
         let collector = BreakpointCollector::from_binary(&path);
-        assert!(collector.is_ok(), "Failed to parse binary: {:?}", collector.err());
+        assert!(
+            collector.is_ok(),
+            "Failed to parse binary: {:?}",
+            collector.err()
+        );
 
         let collector = collector.unwrap();
         // Should find at least some blocks (main at minimum)

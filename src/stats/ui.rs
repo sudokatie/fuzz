@@ -57,10 +57,10 @@ impl FuzzUI {
                 let chunks = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([
-                        Constraint::Length(3),  // Header
-                        Constraint::Length(8),  // Stats
-                        Constraint::Length(3),  // Progress
-                        Constraint::Min(3),     // Status
+                        Constraint::Length(3), // Header
+                        Constraint::Length(8), // Stats
+                        Constraint::Length(3), // Progress
+                        Constraint::Min(3),    // Status
                     ])
                     .split(f.size());
 
@@ -101,7 +101,9 @@ impl FuzzUI {
         disable_raw_mode().map_err(|e| crate::error::Error::Io(e))?;
         execute!(self.terminal.backend_mut(), LeaveAlternateScreen)
             .map_err(|e| crate::error::Error::Io(e))?;
-        self.terminal.show_cursor().map_err(|e| crate::error::Error::Io(e))?;
+        self.terminal
+            .show_cursor()
+            .map_err(|e| crate::error::Error::Io(e))?;
         Ok(())
     }
 }
@@ -165,10 +167,7 @@ fn create_stats_panel(stats: &Stats) -> Paragraph<'static> {
         ]),
         Line::from(vec![
             Span::styled("  Stage: ", Style::default().fg(Color::Cyan)),
-            Span::styled(
-                stats.stage.clone(),
-                Style::default().fg(Color::Yellow),
-            ),
+            Span::styled(stats.stage.clone(), Style::default().fg(Color::Yellow)),
             if let Some(entry) = stats.current_entry {
                 Span::raw(format!("   Entry: #{}", entry))
             } else {
@@ -177,8 +176,7 @@ fn create_stats_panel(stats: &Stats) -> Paragraph<'static> {
         ]),
     ];
 
-    Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title("Statistics"))
+    Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Statistics"))
 }
 
 fn create_progress_gauge(stats: &Stats) -> Gauge<'static> {

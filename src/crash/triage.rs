@@ -103,7 +103,10 @@ mod tests {
     fn test_crash_type_names() {
         assert_eq!(CrashType::SegFault.name(), "Segmentation Fault");
         assert_eq!(CrashType::Timeout.name(), "Timeout");
-        assert_eq!(CrashType::AsanHeapOverflow.name(), "ASAN: Heap Buffer Overflow");
+        assert_eq!(
+            CrashType::AsanHeapOverflow.name(),
+            "ASAN: Heap Buffer Overflow"
+        );
     }
 
     #[test]
@@ -128,10 +131,7 @@ mod tests {
             triage_from_status(&ExitStatus::Signal(libc::SIGSEGV)),
             CrashType::SegFault
         );
-        assert_eq!(
-            triage_from_status(&ExitStatus::Timeout),
-            CrashType::Timeout
-        );
+        assert_eq!(triage_from_status(&ExitStatus::Timeout), CrashType::Timeout);
         assert_eq!(
             triage_from_status(&ExitStatus::Normal(1)),
             CrashType::Unknown

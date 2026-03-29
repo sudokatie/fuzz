@@ -307,8 +307,8 @@ mod tests {
     #[test]
     fn test_executor_normal_exit() {
         let script = create_test_script("exit 0");
-        let executor = ForkExecutor::new(script.path().to_path_buf())
-            .timeout(Duration::from_secs(5));
+        let executor =
+            ForkExecutor::new(script.path().to_path_buf()).timeout(Duration::from_secs(5));
 
         let result = executor.run(b"test input").unwrap();
         assert_eq!(result.status, ExitStatus::Normal(0));
@@ -317,8 +317,8 @@ mod tests {
     #[test]
     fn test_executor_non_zero_exit() {
         let script = create_test_script("exit 42");
-        let executor = ForkExecutor::new(script.path().to_path_buf())
-            .timeout(Duration::from_secs(5));
+        let executor =
+            ForkExecutor::new(script.path().to_path_buf()).timeout(Duration::from_secs(5));
 
         let result = executor.run(b"test input").unwrap();
         assert_eq!(result.status, ExitStatus::Normal(42));
@@ -327,8 +327,8 @@ mod tests {
     #[test]
     fn test_executor_timeout() {
         let script = create_test_script("sleep 10");
-        let executor = ForkExecutor::new(script.path().to_path_buf())
-            .timeout(Duration::from_millis(100));
+        let executor =
+            ForkExecutor::new(script.path().to_path_buf()).timeout(Duration::from_millis(100));
 
         let result = executor.run(b"test input").unwrap();
         assert_eq!(result.status, ExitStatus::Timeout);

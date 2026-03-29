@@ -70,20 +70,16 @@ impl Scheduler {
     /// Add an entry to the scheduler.
     pub fn add(&mut self, metadata: EntryMetadata) {
         let energy = calculate_energy(&metadata, &EnergyConfig::default());
-        self.entries.insert(
-            metadata.id,
-            SchedulerEntry { metadata, energy },
-        );
+        self.entries
+            .insert(metadata.id, SchedulerEntry { metadata, energy });
         self.dirty = true;
     }
 
     /// Add an entry with custom energy config.
     pub fn add_with_config(&mut self, metadata: EntryMetadata, config: &EnergyConfig) {
         let energy = calculate_energy(&metadata, config);
-        self.entries.insert(
-            metadata.id,
-            SchedulerEntry { metadata, energy },
-        );
+        self.entries
+            .insert(metadata.id, SchedulerEntry { metadata, energy });
         self.dirty = true;
     }
 
@@ -241,7 +237,12 @@ pub fn calculate_energy(metadata: &EntryMetadata, config: &EnergyConfig) -> f64 
 mod tests {
     use super::*;
 
-    fn make_metadata(id: u64, exec_time_us: u64, coverage_count: usize, depth: usize) -> EntryMetadata {
+    fn make_metadata(
+        id: u64,
+        exec_time_us: u64,
+        coverage_count: usize,
+        depth: usize,
+    ) -> EntryMetadata {
         EntryMetadata {
             id,
             exec_time_us,
@@ -308,7 +309,12 @@ mod tests {
         // Fast entry should have higher energy
         let fast_energy = sched.get_energy(1).unwrap();
         let slow_energy = sched.get_energy(2).unwrap();
-        assert!(fast_energy > slow_energy, "fast: {}, slow: {}", fast_energy, slow_energy);
+        assert!(
+            fast_energy > slow_energy,
+            "fast: {}, slow: {}",
+            fast_energy,
+            slow_energy
+        );
 
         // Select many times, fast should be selected more often
         let mut rng = rand::thread_rng();

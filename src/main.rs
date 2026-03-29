@@ -147,7 +147,10 @@ fn run(cli: Cli) -> fuzz::Result<()> {
             // TODO: implement minimization
             Ok(())
         }
-        Commands::Triage { crashes_dir, target } => {
+        Commands::Triage {
+            crashes_dir,
+            target,
+        } => {
             println!(
                 "triaging crashes in {} for target {}",
                 crashes_dir.display(),

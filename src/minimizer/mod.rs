@@ -156,20 +156,14 @@ mod tests {
 
     #[test]
     fn test_minimize_corpus_unique_coverage() {
-        let entries = vec![
-            vec![1, 2, 3],
-            vec![4, 5, 6],
-            vec![7, 8, 9],
-        ];
+        let entries = vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9]];
 
         // Each entry has unique coverage
-        let result = minimize_corpus(&entries, |e| {
-            match e[0] {
-                1 => vec![100],
-                4 => vec![200],
-                7 => vec![300],
-                _ => vec![],
-            }
+        let result = minimize_corpus(&entries, |e| match e[0] {
+            1 => vec![100],
+            4 => vec![200],
+            7 => vec![300],
+            _ => vec![],
         });
 
         assert_eq!(result.len(), 3);
@@ -178,18 +172,16 @@ mod tests {
     #[test]
     fn test_minimize_corpus_overlapping_coverage() {
         let entries = vec![
-            vec![1],  // coverage: [100, 200]
-            vec![2],  // coverage: [100]
-            vec![3],  // coverage: [200]
+            vec![1], // coverage: [100, 200]
+            vec![2], // coverage: [100]
+            vec![3], // coverage: [200]
         ];
 
-        let result = minimize_corpus(&entries, |e| {
-            match e[0] {
-                1 => vec![100, 200],
-                2 => vec![100],
-                3 => vec![200],
-                _ => vec![],
-            }
+        let result = minimize_corpus(&entries, |e| match e[0] {
+            1 => vec![100, 200],
+            2 => vec![100],
+            3 => vec![200],
+            _ => vec![],
         });
 
         // Entry [1] covers both, so others are redundant
@@ -200,18 +192,16 @@ mod tests {
     #[test]
     fn test_minimize_corpus_partial_overlap() {
         let entries = vec![
-            vec![1],  // coverage: [100]
-            vec![2],  // coverage: [200]
-            vec![3],  // coverage: [100, 200] - but checked last, already covered
+            vec![1], // coverage: [100]
+            vec![2], // coverage: [200]
+            vec![3], // coverage: [100, 200] - but checked last, already covered
         ];
 
-        let result = minimize_corpus(&entries, |e| {
-            match e[0] {
-                1 => vec![100],
-                2 => vec![200],
-                3 => vec![100, 200],
-                _ => vec![],
-            }
+        let result = minimize_corpus(&entries, |e| match e[0] {
+            1 => vec![100],
+            2 => vec![200],
+            3 => vec![100, 200],
+            _ => vec![],
         });
 
         // Entry [3] has most coverage, should be selected first

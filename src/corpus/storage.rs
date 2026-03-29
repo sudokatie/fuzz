@@ -104,7 +104,15 @@ impl CorpusStorage {
                 "SELECT coverage_hash, exec_time_us, found_at, parent_id, mutation
                  FROM entries WHERE id = ?1",
                 params![id as i64],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
             )
             .ok();
 
@@ -112,8 +120,8 @@ impl CorpusStorage {
             return Ok(None);
         };
 
-        let found_at = SystemTime::UNIX_EPOCH
-            + std::time::Duration::from_secs(found_at_secs as u64);
+        let found_at =
+            SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(found_at_secs as u64);
 
         // Load new coverage bits
         let mut stmt = self
@@ -181,9 +189,9 @@ impl CorpusStorage {
 
     /// Get the next available ID.
     pub fn next_id(&self) -> Result<u64> {
-        let max_id: Option<i64> =
-            self.db
-                .query_row("SELECT MAX(id) FROM entries", [], |row| row.get(0))?;
+        let max_id: Option<i64> = self
+            .db
+            .query_row("SELECT MAX(id) FROM entries", [], |row| row.get(0))?;
         Ok(max_id.map(|id| (id + 1) as u64).unwrap_or(1))
     }
 

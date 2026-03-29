@@ -148,8 +148,7 @@ fn create_shm(path: &str, size: usize) -> Result<MmapMut> {
 
         // Create File from fd for memmap2
         let file = File::from_raw_fd(fd);
-        MmapMut::map_mut(&file)
-            .map_err(|e| Error::Coverage(format!("mmap failed: {}", e)))
+        MmapMut::map_mut(&file).map_err(|e| Error::Coverage(format!("mmap failed: {}", e)))
     }
 }
 
@@ -188,8 +187,7 @@ fn create_shm(path: &str, size: usize) -> Result<MmapMut> {
         }
 
         let file = File::from_raw_fd(fd);
-        MmapMut::map_mut(&file)
-            .map_err(|e| Error::Coverage(format!("mmap failed: {}", e)))
+        MmapMut::map_mut(&file).map_err(|e| Error::Coverage(format!("mmap failed: {}", e)))
     }
 }
 
@@ -213,8 +211,7 @@ fn create_shm(path: &str, size: usize) -> Result<MmapMut> {
     file.write_all(&vec![0u8; size])
         .map_err(|e| Error::Coverage(format!("failed to initialize file: {}", e)))?;
 
-    MmapMut::map_mut(&file)
-        .map_err(|e| Error::Coverage(format!("mmap failed: {}", e)))
+    MmapMut::map_mut(&file).map_err(|e| Error::Coverage(format!("mmap failed: {}", e)))
 }
 
 /// Unlink shared memory.
