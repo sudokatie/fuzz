@@ -8,8 +8,8 @@ Cargo.lock
 
 # Fuzzing output
 fuzz_output/
-crashes/
-corpus/
+/crashes/
+/corpus/
 
 # Test artifacts
 test_targets/*.o
