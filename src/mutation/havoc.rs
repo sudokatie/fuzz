@@ -1,9 +1,11 @@
 use super::block::{BlockClone, BlockDelete, BlockInsert, BlockOverwrite, BlockSwap};
+use super::dictionary::{DictInsert, DictOverwrite, Dictionary};
 use super::interesting::{Interesting16, Interesting32, Interesting8};
 use super::strategies::{
     Arith16, Arith32, Arith8, BitFlip1, BitFlip2, BitFlip4, ByteFlip1, ByteFlip2, ByteFlip4,
     MutationStrategy, RandomByte, RngCore,
 };
+use std::path::Path;
 
 /// Havoc mutator applies multiple random mutations.
 pub struct HavocMutator {
@@ -47,6 +49,16 @@ impl HavocMutator {
             min_mutations: 2,
             max_mutations: 16,
         }
+    }
+
+    /// Create a havoc mutator with dictionary strategies.
+    pub fn with_dictionary(dict: Dictionary) -> Self {
+        let mut mutator = Self::new();
+        if !dict.is_empty() {
+            mutator.strategies.push(Box::new(DictInsert::new(dict.clone())));
+            mutator.strategies.push(Box::new(DictOverwrite::new(dict)));
+        }
+        mutator
     }
 
     /// Set the range of mutations to apply.
@@ -127,6 +139,20 @@ impl Mutator {
         }
     }
 
+    /// Create a mutator with a dictionary.
+    pub fn with_dictionary(dict: Dictionary) -> Self {
+        Self {
+            havoc: HavocMutator::with_dictionary(dict),
+            stage: MutationStage::Havoc,
+        }
+    }
+
+    /// Create a mutator by loading dictionary from file.
+    pub fn with_dictionary_file(path: &Path) -> crate::error::Result<Self> {
+        let dict = Dictionary::load(path)?;
+        Ok(Self::with_dictionary(dict))
+    }
+
     /// Get current mutation stage.
     pub fn stage(&self) -> MutationStage {
         self.stage
@@ -168,6 +194,17 @@ mod tests {
     fn test_havoc_mutator_new() {
         let havoc = HavocMutator::new();
         assert!(!havoc.strategies.is_empty());
+    }
+
+    #[test]
+    fn test_havoc_mutator_with_dictionary() {
+        let mut dict = Dictionary::new();
+        dict.add(b"FUZZ".to_vec());
+        dict.add(b"TEST".to_vec());
+        
+        let havoc = HavocMutator::with_dictionary(dict);
+        // Should have default strategies + 2 dict strategies
+        assert!(havoc.strategies.len() > 18);
     }
 
     #[test]
@@ -218,6 +255,15 @@ mod tests {
     #[test]
     fn test_mutator_new() {
         let mutator = Mutator::new();
+        assert_eq!(mutator.stage(), MutationStage::Havoc);
+    }
+
+    #[test]
+    fn test_mutator_with_dictionary() {
+        let mut dict = Dictionary::new();
+        dict.add(b"TEST".to_vec());
+        
+        let mutator = Mutator::with_dictionary(dict);
         assert_eq!(mutator.stage(), MutationStage::Havoc);
     }
 

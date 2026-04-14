@@ -1,6 +1,5 @@
 use crate::error::Result;
 use crate::executor::{ExitStatus, ForkExecutor};
-use std::time::Duration;
 
 /// Minimizes a crashing input to the smallest reproducer.
 pub struct Minimizer {
@@ -108,7 +107,7 @@ impl Minimizer {
 /// Minimize a corpus to the smallest set with the same coverage.
 pub fn minimize_corpus(
     entries: &[Vec<u8>],
-    coverage_fn: impl Fn(&[u8]) -> Vec<u16>,
+    mut coverage_fn: impl FnMut(&[u8]) -> Vec<u16>,
 ) -> Vec<Vec<u8>> {
     use std::collections::HashSet;
 

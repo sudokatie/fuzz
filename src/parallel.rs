@@ -1,17 +1,22 @@
 use crate::config::Config;
 use crate::corpus::{CorpusEntry, CorpusStorage, EntryMetadata, Scheduler};
-use crate::coverage::{Bitmap, SancovCollector};
+use crate::coverage::{Bitmap, CoverageCollector, create_collector};
 use crate::crash::{triage_from_signal, Crash, CrashStorage};
 use crate::error::{Error, Result};
 use crate::executor::{ExitStatus, ForkExecutor, InputMode};
+use crate::fuzzer::FuzzResult;
 use crate::mutation::Mutator;
 use crate::stats::Stats;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
+use serde::Serialize;
+use std::fs::{self, File};
+use std::io::{BufWriter, Write};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Atomic statistics for parallel fuzzing.
 #[derive(Debug, Default)]
@@ -21,6 +26,7 @@ pub struct AtomicStats {
     pub timeouts: AtomicU64,
     pub corpus_size: AtomicU64,
     pub coverage_edges: AtomicU64,
+    pub corpus_bytes: AtomicU64,
 }
 
 impl AtomicStats {
@@ -48,6 +54,10 @@ impl AtomicStats {
         self.coverage_edges.store(edges, Ordering::Relaxed);
     }
 
+    pub fn add_corpus_bytes(&self, bytes: u64) {
+        self.corpus_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
     pub fn to_stats(&self, start_time: Instant) -> Stats {
         let mut stats = Stats::new();
         stats.total_execs = self.total_execs.load(Ordering::Relaxed);
@@ -55,9 +65,33 @@ impl AtomicStats {
         stats.timeouts = self.timeouts.load(Ordering::Relaxed);
         stats.corpus_size = self.corpus_size.load(Ordering::Relaxed) as usize;
         stats.coverage_edges = self.coverage_edges.load(Ordering::Relaxed) as usize;
+        stats.corpus_bytes = self.corpus_bytes.load(Ordering::Relaxed) as usize;
         stats.start_time = start_time;
         stats.update_execs_per_sec();
         stats
+    }
+}
+
+/// Storage for hang/timeout inputs
+pub struct HangStorage {
+    dir: PathBuf,
+    count: AtomicU64,
+}
+
+impl HangStorage {
+    fn open(dir: &PathBuf) -> Result<Self> {
+        fs::create_dir_all(dir)?;
+        Ok(Self {
+            dir: dir.clone(),
+            count: AtomicU64::new(0),
+        })
+    }
+
+    fn save(&self, input: &[u8]) -> Result<()> {
+        let count = self.count.fetch_add(1, Ordering::Relaxed);
+        let path = self.dir.join(format!("hang_{:06}", count));
+        fs::write(&path, input)?;
+        Ok(())
     }
 }
 
@@ -69,6 +103,8 @@ pub struct SharedState {
     pub scheduler: RwLock<Scheduler>,
     /// Crash storage.
     pub crashes: Mutex<CrashStorage>,
+    /// Hang storage.
+    pub hangs: HangStorage,
     /// Corpus storage.
     pub corpus: Mutex<CorpusStorage>,
     /// Atomic statistics.
@@ -77,18 +113,30 @@ pub struct SharedState {
     pub next_entry_id: AtomicU64,
     /// Running flag.
     pub running: AtomicBool,
+    /// Output directory.
+    pub output_dir: PathBuf,
+    /// Start time (unix timestamp).
+    pub start_time_unix: u64,
 }
 
 impl SharedState {
-    pub fn new(corpus: CorpusStorage, crashes: CrashStorage) -> Self {
+    pub fn new(corpus: CorpusStorage, crashes: CrashStorage, hangs: HangStorage, output_dir: PathBuf) -> Self {
+        let start_time_unix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
         Self {
             virgin: RwLock::new(Bitmap::virgin()),
             scheduler: RwLock::new(Scheduler::new()),
             crashes: Mutex::new(crashes),
+            hangs,
             corpus: Mutex::new(corpus),
             stats: AtomicStats::new(),
             next_entry_id: AtomicU64::new(1),
             running: AtomicBool::new(true),
+            output_dir,
+            start_time_unix,
         }
     }
 
@@ -105,12 +153,31 @@ impl SharedState {
     }
 }
 
+/// Stats file format for stats.json
+#[derive(Serialize)]
+struct StatsJson {
+    start_time: u64,
+    last_update: u64,
+    fuzzer_pid: u32,
+    cycles_done: u64,
+    execs_done: u64,
+    execs_per_sec: f64,
+    corpus_count: u64,
+    corpus_bytes: u64,
+    crashes_total: u64,
+    crashes_unique: u64,
+    timeouts_total: u64,
+    coverage_edges: u64,
+    workers: usize,
+}
+
 /// Parallel fuzzer with multiple worker threads.
 pub struct ParallelFuzzer {
     config: Config,
     shared: Arc<SharedState>,
     workers: Vec<JoinHandle<()>>,
     start_time: Instant,
+    log_file: Option<Mutex<BufWriter<File>>>,
 }
 
 impl ParallelFuzzer {
@@ -118,15 +185,18 @@ impl ParallelFuzzer {
     pub fn new(config: Config) -> Result<Self> {
         config.validate()?;
 
-        let target_path = config
+        let _target_path = config
             .target
             .path
             .as_ref()
             .ok_or_else(|| Error::Config("target path required".into()))?;
 
-        // Create output directory
-        std::fs::create_dir_all(&config.output.dir)
+        // Create output directory structure
+        fs::create_dir_all(&config.output.dir)
             .map_err(|e| Error::Config(format!("failed to create output dir: {}", e)))?;
+
+        let queue_dir = config.output.dir.join("queue");
+        fs::create_dir_all(&queue_dir)?;
 
         // Initialize corpus storage
         let corpus = CorpusStorage::open(&config.output.dir)?;
@@ -135,14 +205,96 @@ impl ParallelFuzzer {
         let crashes_dir = config.output.dir.join("crashes");
         let crashes = CrashStorage::open(&crashes_dir)?;
 
-        let shared = Arc::new(SharedState::new(corpus, crashes));
+        // Initialize hang storage
+        let hangs_dir = config.output.dir.join("hangs");
+        let hangs = HangStorage::open(&hangs_dir)?;
+
+        // Initialize log file
+        let log_path = config.output.dir.join("fuzz.log");
+        let log_file = File::create(&log_path)
+            .ok()
+            .map(|f| Mutex::new(BufWriter::new(f)));
+
+        let shared = Arc::new(SharedState::new(corpus, crashes, hangs, config.output.dir.clone()));
 
         Ok(Self {
             config,
             shared,
             workers: Vec::new(),
             start_time: Instant::now(),
+            log_file,
         })
+    }
+
+    /// Get reference to shared state (for external Ctrl-C handling).
+    pub fn shared_state(&self) -> Arc<SharedState> {
+        Arc::clone(&self.shared)
+    }
+
+    /// Log a message to fuzz.log
+    fn log(&self, msg: &str) {
+        if let Some(ref log) = self.log_file {
+            if let Ok(mut log) = log.lock() {
+                let elapsed = self.start_time.elapsed().as_secs();
+                let _ = writeln!(log, "[{:>8}s] {}", elapsed, msg);
+                let _ = log.flush();
+            }
+        }
+    }
+
+    /// Write stats.json
+    fn write_stats_json(&self) -> Result<()> {
+        let now_unix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let stats = &self.shared.stats;
+        let elapsed = self.start_time.elapsed().as_secs_f64().max(0.001);
+
+        let json_stats = StatsJson {
+            start_time: self.shared.start_time_unix,
+            last_update: now_unix,
+            fuzzer_pid: std::process::id(),
+            cycles_done: stats.total_execs.load(Ordering::Relaxed) / 
+                stats.corpus_size.load(Ordering::Relaxed).max(1),
+            execs_done: stats.total_execs.load(Ordering::Relaxed),
+            execs_per_sec: stats.total_execs.load(Ordering::Relaxed) as f64 / elapsed,
+            corpus_count: stats.corpus_size.load(Ordering::Relaxed),
+            corpus_bytes: stats.corpus_bytes.load(Ordering::Relaxed),
+            crashes_total: stats.crashes_found.load(Ordering::Relaxed),
+            crashes_unique: stats.crashes_found.load(Ordering::Relaxed),
+            timeouts_total: stats.timeouts.load(Ordering::Relaxed),
+            coverage_edges: stats.coverage_edges.load(Ordering::Relaxed),
+            workers: self.config.execution.jobs,
+        };
+
+        let path = self.shared.output_dir.join("stats.json");
+        let json = serde_json::to_string_pretty(&json_stats)
+            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        fs::write(&path, json)?;
+
+        Ok(())
+    }
+
+    /// Write plot_data file
+    fn write_plot_data(&self) -> Result<()> {
+        let stats = &self.shared.stats;
+        let path = self.shared.output_dir.join("plot_data");
+        let mut file = File::create(&path)?;
+
+        writeln!(file, "# time_secs, execs, corpus_size, coverage_edges, crashes")?;
+        writeln!(
+            file,
+            "{}, {}, {}, {}, {}",
+            self.start_time.elapsed().as_secs(),
+            stats.total_execs.load(Ordering::Relaxed),
+            stats.corpus_size.load(Ordering::Relaxed),
+            stats.coverage_edges.load(Ordering::Relaxed),
+            stats.crashes_found.load(Ordering::Relaxed)
+        )?;
+
+        Ok(())
     }
 
     /// Load seeds into the corpus.
@@ -154,27 +306,32 @@ impl ParallelFuzzer {
                 continue;
             }
 
-            for entry in std::fs::read_dir(seed_dir)
+            for entry in fs::read_dir(seed_dir)
                 .map_err(|e| Error::Corpus(format!("failed to read seed dir: {}", e)))?
             {
                 let entry = entry.map_err(|e| Error::Corpus(e.to_string()))?;
                 let path = entry.path();
 
                 if path.is_file() {
-                    let input = std::fs::read(&path)
+                    let input = fs::read(&path)
                         .map_err(|e| Error::Corpus(format!("failed to read seed: {}", e)))?;
 
                     if input.len() <= self.config.corpus.max_size {
                         let id = self.shared.next_id();
-                        let entry = CorpusEntry::new(id, input);
+                        let entry = CorpusEntry::new(id, input.clone());
 
                         // Save to corpus
                         self.shared.corpus.lock().unwrap().save(&entry)?;
+
+                        // Save to queue directory
+                        let queue_path = self.shared.output_dir.join("queue").join(format!("id:{:06}", id));
+                        fs::write(&queue_path, &entry.input)?;
 
                         // Add to scheduler
                         let metadata = EntryMetadata::from_entry(&entry, 0);
                         self.shared.scheduler.write().unwrap().add(metadata);
 
+                        self.shared.stats.add_corpus_bytes(input.len() as u64);
                         loaded += 1;
                     }
                 }
@@ -192,15 +349,18 @@ impl ParallelFuzzer {
         }
 
         self.shared.stats.set_corpus_size(loaded as u64);
+        self.log(&format!("Loaded {} seed inputs", loaded));
         Ok(loaded)
     }
 
     /// Run the parallel fuzzer with the configured number of jobs.
-    pub fn run(&mut self) -> Result<Stats> {
+    pub fn run(&mut self) -> Result<FuzzResult> {
         let jobs = self.config.execution.jobs.max(1);
 
         // Load seeds first
         self.load_seeds()?;
+
+        self.log(&format!("Starting {} worker threads", jobs));
 
         // Spawn worker threads
         for worker_id in 0..jobs {
@@ -216,12 +376,37 @@ impl ParallelFuzzer {
             self.workers.push(handle);
         }
 
+        // Periodic stats writing in main thread
+        let mut last_stats_write = Instant::now();
+        while self.shared.is_running() {
+            thread::sleep(Duration::from_millis(100));
+
+            // Write stats every 5 seconds
+            if last_stats_write.elapsed() >= Duration::from_secs(5) {
+                let _ = self.write_stats_json();
+                last_stats_write = Instant::now();
+            }
+
+            // Check if all workers are done
+            let all_done = self.workers.iter().all(|h| h.is_finished());
+            if all_done {
+                break;
+            }
+        }
+
         // Wait for all workers
         for handle in self.workers.drain(..) {
             let _ = handle.join();
         }
 
-        Ok(self.shared.stats.to_stats(self.start_time))
+        // Final writes
+        let _ = self.write_stats_json();
+        let _ = self.write_plot_data();
+        self.log(&format!("Fuzzing complete. {} executions, {} crashes",
+            self.shared.stats.total_execs.load(Ordering::Relaxed),
+            self.shared.stats.crashes_found.load(Ordering::Relaxed)));
+
+        Ok(self.shared.stats.to_stats(self.start_time).into())
     }
 
     /// Stop all workers.
@@ -240,19 +425,58 @@ impl ParallelFuzzer {
     }
 }
 
+impl From<Stats> for FuzzResult {
+    fn from(stats: Stats) -> Self {
+        FuzzResult {
+            total_execs: stats.total_execs,
+            crashes_found: stats.crashes_found,
+            corpus_size: stats.corpus_size,
+            coverage_edges: stats.coverage_edges,
+            duration: stats.elapsed(),
+        }
+    }
+}
+
 /// Worker thread main loop.
-fn run_worker(worker_id: usize, config: Config, shared: Arc<SharedState>) -> Result<()> {
+fn run_worker(_worker_id: usize, config: Config, shared: Arc<SharedState>) -> Result<()> {
     let target_path = config.target.path.as_ref().unwrap();
 
-    // Each worker has its own executor and RNG
-    let executor = ForkExecutor::new(target_path.clone())
+    // Determine input mode
+    let input_mode = if config.target.args.iter().any(|a| a == "@@") {
+        InputMode::ArgReplace
+    } else {
+        InputMode::Stdin
+    };
+
+    // Each worker has its own coverage collector and RNG
+    let mut coverage = create_collector(config.execution.coverage_mode.clone(), target_path)?;
+
+    // Each worker has its own executor
+    let mut executor = ForkExecutor::new(target_path.clone())
         .args(config.target.args.clone())
         .timeout(Duration::from_millis(config.execution.timeout_ms))
-        .input_mode(InputMode::Stdin);
+        .input_mode(input_mode);
 
-    let mut mutator = Mutator::new();
+    // Set coverage env var if the collector provides one
+    if let Some((cov_env_key, cov_env_val)) = coverage.env_var() {
+        executor = executor.env(cov_env_key, cov_env_val);
+    }
+
+    // Apply memory limit if specified
+    if let Some(mem_mb) = config.execution.memory_limit_mb {
+        executor = executor.memory_limit(mem_mb);
+    }
+
+    // Initialize mutator (with dictionary if configured)
+    let mutator = if let Some(ref dict_path) = config.mutation.dictionary {
+        match Mutator::with_dictionary_file(dict_path) {
+            Ok(m) => m,
+            Err(_) => Mutator::new(),
+        }
+    } else {
+        Mutator::new()
+    };
     let mut rng = StdRng::from_entropy();
-    let mut coverage = SancovCollector::new()?;
 
     while shared.is_running() {
         // Select entry from corpus
@@ -285,8 +509,7 @@ fn run_worker(worker_id: usize, config: Config, shared: Arc<SharedState>) -> Res
                 break;
             }
 
-            let mut input = entry.input.clone();
-            mutator.mutate(&mut input, &mut rng);
+            let mut input = mutator.mutate(&entry.input, &mut rng);
 
             // Enforce size limit
             if input.len() > config.corpus.max_size {
@@ -310,6 +533,8 @@ fn run_worker(worker_id: usize, config: Config, shared: Arc<SharedState>) -> Res
                 }
                 ExitStatus::Timeout => {
                     shared.stats.record_timeout();
+                    // Save hang
+                    let _ = shared.hangs.save(&input);
                 }
                 ExitStatus::Normal(_) => {
                     // Check for new coverage
@@ -324,20 +549,28 @@ fn run_worker(worker_id: usize, config: Config, shared: Arc<SharedState>) -> Res
                         {
                             let mut virgin = shared.virgin.write().unwrap();
                             bitmap.update_virgin(&mut virgin);
+
+                            // Update coverage edges count
+                            let edge_count = virgin.as_slice().iter().filter(|&&b| b != 0xff).count();
+                            shared.stats.set_coverage_edges(edge_count as u64);
                         }
 
                         // Add to corpus
                         let id = shared.next_id();
-                        let mut new_entry = CorpusEntry::new(id, input);
+                        let mut new_entry = CorpusEntry::new(id, input.clone());
                         new_entry.parent_id = Some(entry.id);
                         new_entry.coverage_hash = bitmap.hash();
                         new_entry.new_coverage = bitmap.set_indices();
                         new_entry.exec_time_us = result.exec_time.as_micros() as u64;
 
                         {
-                            let mut corpus = shared.corpus.lock().unwrap();
+                            let corpus = shared.corpus.lock().unwrap();
                             corpus.save(&new_entry)?;
                         }
+
+                        // Save to queue directory
+                        let queue_path = shared.output_dir.join("queue").join(format!("id:{:06}", id));
+                        let _ = fs::write(&queue_path, &input);
 
                         {
                             let metadata = EntryMetadata::from_entry(&new_entry, 1);
@@ -345,9 +578,8 @@ fn run_worker(worker_id: usize, config: Config, shared: Arc<SharedState>) -> Res
                             scheduler.add(metadata);
                         }
 
-                        shared
-                            .stats
-                            .set_corpus_size(shared.scheduler.read().unwrap().len() as u64);
+                        shared.stats.add_corpus_bytes(input.len() as u64);
+                        shared.stats.set_corpus_size(shared.scheduler.read().unwrap().len() as u64);
                     }
                 }
             }
@@ -420,8 +652,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let corpus = CorpusStorage::open(temp_dir.path()).unwrap();
         let crashes = CrashStorage::open(&temp_dir.path().join("crashes")).unwrap();
+        let hangs = HangStorage::open(&temp_dir.path().join("hangs")).unwrap();
 
-        let shared = SharedState::new(corpus, crashes);
+        let shared = SharedState::new(corpus, crashes, hangs, temp_dir.path().to_path_buf());
 
         assert_eq!(shared.next_id(), 1);
         assert_eq!(shared.next_id(), 2);
@@ -433,8 +666,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let corpus = CorpusStorage::open(temp_dir.path()).unwrap();
         let crashes = CrashStorage::open(&temp_dir.path().join("crashes")).unwrap();
+        let hangs = HangStorage::open(&temp_dir.path().join("hangs")).unwrap();
 
-        let shared = SharedState::new(corpus, crashes);
+        let shared = SharedState::new(corpus, crashes, hangs, temp_dir.path().to_path_buf());
 
         assert!(shared.is_running());
         shared.stop();
@@ -454,9 +688,9 @@ mod tests {
     fn test_parallel_fuzzer_load_seeds() {
         let temp_dir = TempDir::new().unwrap();
         let seeds_dir = temp_dir.path().join("seeds");
-        std::fs::create_dir(&seeds_dir).unwrap();
-        std::fs::write(seeds_dir.join("seed1"), b"test1").unwrap();
-        std::fs::write(seeds_dir.join("seed2"), b"test2").unwrap();
+        fs::create_dir(&seeds_dir).unwrap();
+        fs::write(seeds_dir.join("seed1"), b"test1").unwrap();
+        fs::write(seeds_dir.join("seed2"), b"test2").unwrap();
 
         let mut config = make_test_config(&temp_dir);
         config.corpus.seed_dirs.push(seeds_dir);
@@ -477,5 +711,17 @@ mod tests {
 
         fuzzer.stop();
         assert!(!fuzzer.shared.is_running());
+    }
+
+    #[test]
+    fn test_output_directories_created() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = make_test_config(&temp_dir);
+
+        let _fuzzer = ParallelFuzzer::new(config).unwrap();
+
+        assert!(temp_dir.path().join("queue").exists());
+        assert!(temp_dir.path().join("crashes").exists());
+        assert!(temp_dir.path().join("hangs").exists());
     }
 }

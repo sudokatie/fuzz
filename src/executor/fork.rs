@@ -1,10 +1,6 @@
 use crate::error::{Error, Result};
-use nix::sys::signal::{self, Signal};
-use nix::sys::wait::{waitpid, WaitStatus};
-use nix::unistd::{fork, ForkResult, Pid};
-use std::fs::{self, File};
+use std::fs::{self};
 use std::io::Write;
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -77,6 +73,8 @@ pub struct ForkExecutor {
     timeout: Duration,
     input_mode: InputMode,
     temp_dir: PathBuf,
+    memory_limit_mb: Option<u64>,
+    env_vars: Vec<(String, String)>,
 }
 
 impl ForkExecutor {
@@ -88,6 +86,8 @@ impl ForkExecutor {
             timeout: Duration::from_secs(1),
             input_mode: InputMode::default(),
             temp_dir: std::env::temp_dir(),
+            memory_limit_mb: None,
+            env_vars: Vec::new(),
         }
     }
 
@@ -112,6 +112,18 @@ impl ForkExecutor {
     /// Set temp directory for input files.
     pub fn temp_dir(mut self, dir: PathBuf) -> Self {
         self.temp_dir = dir;
+        self
+    }
+
+    /// Set memory limit in MB.
+    pub fn memory_limit(mut self, mb: u64) -> Self {
+        self.memory_limit_mb = Some(mb);
+        self
+    }
+
+    /// Add an environment variable.
+    pub fn env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.env_vars.push((key.into(), value.into()));
         self
     }
 
@@ -149,7 +161,7 @@ impl ForkExecutor {
             self.args.clone()
         };
 
-        // Execute using Command (safer than raw fork)
+        // Execute using Command
         let result = self.execute_with_timeout(input, &args, input_file.as_deref())?;
 
         // Clean up temp file
@@ -174,6 +186,11 @@ impl ForkExecutor {
         let mut cmd = Command::new(&self.target);
         cmd.args(args);
 
+        // Set environment variables
+        for (key, value) in &self.env_vars {
+            cmd.env(key, value);
+        }
+
         // Set up stdin
         match &self.input_mode {
             InputMode::Stdin => {
@@ -186,6 +203,23 @@ impl ForkExecutor {
 
         cmd.stdout(Stdio::null());
         cmd.stderr(Stdio::null());
+
+        // Apply memory limit on Unix
+        #[cfg(unix)]
+        if let Some(mem_mb) = self.memory_limit_mb {
+            use std::os::unix::process::CommandExt;
+            let mem_bytes = mem_mb * 1024 * 1024;
+            unsafe {
+                cmd.pre_exec(move || {
+                    let limit = libc::rlimit {
+                        rlim_cur: mem_bytes,
+                        rlim_max: mem_bytes,
+                    };
+                    libc::setrlimit(libc::RLIMIT_AS, &limit);
+                    Ok(())
+                });
+            }
+        }
 
         let mut child = cmd.spawn().map_err(|e| Error::Target(e.to_string()))?;
 
@@ -206,7 +240,6 @@ impl ForkExecutor {
                     return Ok(if let Some(code) = status.code() {
                         ExitStatus::Normal(code)
                     } else {
-                        // Killed by signal
                         #[cfg(unix)]
                         {
                             use std::os::unix::process::ExitStatusExt;
@@ -267,7 +300,6 @@ mod tests {
         writeln!(file, "{}", content).unwrap();
         file.flush().unwrap();
 
-        // Make executable
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -343,6 +375,15 @@ mod tests {
 
         let result = executor.run(b"hello\n").unwrap();
         assert_eq!(result.status, ExitStatus::Normal(0));
+    }
+
+    #[test]
+    fn test_executor_memory_limit() {
+        let executor = ForkExecutor::new(PathBuf::from("/usr/bin/true"))
+            .memory_limit(100)
+            .timeout(Duration::from_secs(5));
+
+        assert_eq!(executor.memory_limit_mb, Some(100));
     }
 
     #[test]

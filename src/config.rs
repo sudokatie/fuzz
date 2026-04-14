@@ -50,6 +50,17 @@ fn default_max_input_size() -> usize {
     1_048_576 // 1MB
 }
 
+/// Coverage tracking mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CoverageMode {
+    /// SanitizerCoverage (requires instrumented binary)
+    #[default]
+    Sancov,
+    /// Breakpoint-based coverage (works on uninstrumented binaries)
+    Breakpoint,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ExecutionConfig {
     #[serde(default = "default_timeout")]
@@ -59,6 +70,12 @@ pub struct ExecutionConfig {
 
     #[serde(default = "default_jobs")]
     pub jobs: usize,
+
+    #[serde(default)]
+    pub coverage_mode: CoverageMode,
+
+    #[serde(default)]
+    pub persistent: bool,
 }
 
 impl Default for ExecutionConfig {
@@ -67,6 +84,8 @@ impl Default for ExecutionConfig {
             timeout_ms: default_timeout(),
             memory_limit_mb: None,
             jobs: default_jobs(),
+            coverage_mode: CoverageMode::default(),
+            persistent: false,
         }
     }
 }
@@ -79,7 +98,7 @@ fn default_jobs() -> usize {
     1
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct MutationConfig {
     pub dictionary: Option<PathBuf>,
 
@@ -89,6 +108,15 @@ pub struct MutationConfig {
 
 fn default_havoc_cycles() -> usize {
     5
+}
+
+impl Default for MutationConfig {
+    fn default() -> Self {
+        Self {
+            dictionary: None,
+            havoc_cycles: default_havoc_cycles(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -2,7 +2,6 @@
 
 use super::Bitmap;
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::Path;
 
 /// Coverage report for visualization.
@@ -170,7 +169,7 @@ impl CoverageReport {
     /// Generate a coverage map visualization (ASCII art).
     pub fn coverage_map(&self, width: usize) -> String {
         let mut map = String::new();
-        let slice = vec![0u8; self.total_edges]; // Placeholder - would need actual edge data
+        let _slice = vec![0u8; self.total_edges]; // Placeholder - would need actual edge data
         
         // Group edges into chunks for visualization
         let chunk_size = (self.total_edges / width).max(1);
